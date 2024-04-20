@@ -1,11 +1,19 @@
-name: Timeout Workflow
+name: Matrix for jobs
 
-on: push
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
-  job_build:
-    runs-on: ubuntu-latest
+  job_test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-20.04, windows-latest]
+        image: [hello-world, alpine]
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Sleep
-        timeout-minutes: 1
-        run: sleep 300
+      - name: Docker details
+        uses: docker info
+
+      - name: Deploy image on ${{ matrix.os }}
+        run: docker run ${{ matrix.image }}
