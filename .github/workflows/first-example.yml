@@ -1,32 +1,11 @@
-name: Explore variables and secrets
+name: Timeout Workflow
 
-on: workflow_dispatch
-
-env:
-  CONTAINER_REGISTRY: docker.io
-  IMAGE_NAME: myimage
+on: push
 
 jobs:
   job_build:
     runs-on: ubuntu-latest
     steps:
-      - name: Build Docker image
-        run: echo "docker build -t $CONTAINER_REGISTRY/${{ vars.DOCKER_USERNAME }}/$IMAGE_NAME:latest ."
-      - name: Docker login
-        run: echo "docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}"
-      - name: Docker push
-        run: echo "docker push $CONTAINER_REGISTRY/${{ vars.DOCKER_USERNAME }}/$IMAGE_NAME:latest"
-
-  job_deploy:
-    needs: [job_build]
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    steps:
       - name: Sleep
+        timeout-minutes: 1
         run: sleep 300
-      - name: Read file
-        run: cat dragon.txt
-      - name: Deploy
-        run: echo "Deploying..."
