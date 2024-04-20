@@ -7,9 +7,20 @@ on:
 jobs:
   job_test:
     strategy:
+      fail-fast: false
+      # Max 2 jobs run at a time, other jobs will be queued
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, windows-latest]
         image: [hello-world, alpine]
+        # Don't run alpine image on windows-latest
+        exclude:
+          - os: windows-latest
+            image: alpine
+        # Run only another image: amd/alpine on ubuntu-20.04
+        include:
+          - os: ubuntu-20.04
+            image: amd64/alpine
     runs-on: ${{ matrix.os }}
     steps:
       - name: Docker details
