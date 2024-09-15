@@ -1,41 +1,136 @@
-name: Multiple jobs workflow
+name: Solar System Workflow
 
-on: push
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'feature/*'
+
+env:
+  MONGO_URI: 'mongodb+srv://supercluster.d83jj.mongodb.net/superData'
+  MONGO_USERNAME: ${{ vars.MONGO_USERNAME }}
+  MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
 
 jobs:
-  job_build:
+  unit-testing:
+    name: Unit Testing
+    services:
+      mongo-db:
+        image: siddharth67/mongo-db:non-prod
+        ports:
+          - 27017:27017
+    env:
+      MONGO_URI: 'mongodb://localhost:27017/superData'
+      MONGO_USERNAME: non-prod-user
+      MONGO_PASSWORD: non-prod-password
     runs-on: ubuntu-latest
     steps:
-      - name: Install Cowsay command
-        run: sudo apt-get install cowsay -y
-      - name: Execute Cowsay command
-        run: cowsay -f dragon "run for cover, I'm a dragon" >> dragon.txt
-      - name: Store artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifact
-          path: ./dragon.txt
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-  job_test:
-    runs-on: ubuntu-latest
-    needs: job_build
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+      - name: Setup NodeJS Version
+        uses: actions/setup-node@v3
         with:
-          name: build-artifact
-      - name: Test file exists
-        run: grep -i "dragon" dragon.txt
+          node-version: 20
 
-  job_deploy:
-    runs-on: ubuntu-latest
-    needs: [job_build, job_test]
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+      - name: Cache dependencies
+        uses: actions/cache@v3
         with:
-          name: build-artifact
-      - name: Read file
-        run: cat dragon.txt
-      - name: Deploy
-        run: echo "Deploying..."
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Unit Testing
+        run: npm test
+
+      - name: Archive Test Result
+        uses: actions/upload-artifact@v3
+        with:
+          name: Mocha-Test-Result
+          path: test-results.xml
+  code-coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup NodeJS Version
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run code coverage
+        continue-on-error: true
+        run: npm run coverage
+
+      - name: Archive Test Result
+        uses: actions/upload-artifact@v3
+        with:
+          name: Code-Coverage-Result
+          path: coverage
+          retention-days: 5
+
+  docker:
+    permissions:
+      packages: write
+    name: Containerization
+    needs: [unit-testing, code-coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Github Container Registry login
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+
+      - name: Test Docker Image
+        run: |
+          docker images
+          docker run --name solar-system-app -d \
+            -p 3000:3000 \
+            -e MONGO_URI=$MONGO_URI \
+            -e MONGO_USERNAME=$MONGO_USERNAME \
+            -e MONGO_PASSWORD=$MONGO_PASSWORD \
+            ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+          export CONTAINER_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' solar-system-app)
+          echo "Container IP: $CONTAINER_IP"
+          echo "Testing image URL using wget"
+          wget -qO- http://127.0.0.1:3000/live | grep live
+      - name: Push Docker image to Dockerhub and Github Container Registry
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/solar-system:${{ github.sha }}
